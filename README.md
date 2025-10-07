@@ -1,16 +1,16 @@
-BÁO CÁO DỰ ÁN GIỮA KỲ - ỨNG DỤNG KÉT SẮT MẬT KHẨU (PASSWORD SAFE)
-1. Thông Tin Sinh Viên
+# BÁO CÁO DỰ ÁN GIỮA KỲ - ỨNG DỤNG KÉT SẮT MẬT KHẨU (PASSWORD SAFE)
+## 1. Thông Tin Sinh Viên
 Họ và Tên: Vương Huy Huy
 
 Mã Số Sinh Viên: 23010714
 
 
-2. Giới Thiệu Dự Án
+## 2. Giới Thiệu Dự Án
 Password Safe là một ứng dụng desktop được phát triển bằng Python, với mục tiêu cung cấp một giải pháp an toàn và tiện lợi để lưu trữ, quản lý các thông tin nhạy cảm như mật khẩu, ghi chú cá nhân. Lấy cảm hứng từ ý tưởng về một chiếc "két sắt số", ứng dụng cho phép người dùng mã hóa toàn bộ dữ liệu của mình bằng các thuật toán mạnh mẽ và lưu trữ chúng một cách an toàn trên máy tính hoặc thiết bị di động như USB.
 
 Điểm nhấn của dự án là sự kết hợp giữa bảo mật cấp cao (thuật toán AES) và tính di động, cho phép người dùng mang theo dữ liệu của mình một cách an toàn và truy cập trên bất kỳ máy tính nào có cài đặt môi trường Python.
 
-3. Các Tính Năng Nổi Bật
+## 3. Các Tính Năng Nổi Bật
 Ứng dụng được trang bị đầy đủ các chức năng từ cơ bản đến nâng cao, đáp ứng nhu cầu quản lý mật khẩu an toàn:
 
 Giao Diện Hiện Đại: Sử dụng thư viện ttkbootstrap để tạo ra một giao diện người dùng (GUI) chuyên nghiệp, đẹp mắt với chủ đề tối (dark mode).
@@ -41,7 +41,7 @@ Hỗ trợ nhập dữ liệu nhanh từ các file văn bản thô (.txt).
 
 Lưu và mở các file dữ liệu đã được mã hóa (.psafe).
 
-4. Công Nghệ Sử Dụng
+## 4. Công Nghệ Sử Dụng
 Ngôn ngữ lập trình: Python 3
 
 Thư viện giao diện: Tkinter, ttkbootstrap
@@ -52,7 +52,7 @@ Thư viện hệ thống: psutil (để nhận diện và giám sát USB)
 
 Các thư viện chuẩn khác: os, threading, random, string, base64.
 
-5. Hướng Dẫn Cài Đặt và Sử Dụng
+## 5. Hướng Dẫn Cài Đặt và Sử Dụng
 a. Yêu cầu
 Đã cài đặt Python 3.7 trở lên trên máy tính.
 
@@ -76,7 +76,7 @@ python main_app.py
 
 Cửa sổ ứng dụng sẽ hiện ra và sẵn sàng để sử dụng.
 
-6. Kịch bản sử dụng cơ bản
+## 6. Kịch bản sử dụng cơ bản
 Nhập dữ liệu: Soạn thảo mật khẩu trực tiếp hoặc nhấn "Nhập từ .txt" để tải dữ liệu từ file.
 
 Tạo mật khẩu mạnh: Sử dụng chức năng "Tạo Mật Khẩu" để tạo và chèn một mật khẩu an toàn mới.
