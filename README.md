@@ -19,9 +19,11 @@ Mã Hóa Mạnh Mẽ (AES): Dữ liệu được bảo vệ bằng thuật toán
 
 Tùy Chọn Mã Hóa Cổ Điển (Tham Khảo):
 
-Cung cấp thêm 2 thuật toán mã hóa cổ điển là Caesar (dịch vòng) và Transposition (hoán vị) cho mục đích học tập và so sánh.
+Cung cấp thêm 4 thuật toán mã hóa cổ điển là Caesar (dịch vòng), Transposition (hoán vị), Affine, và Hill cho mục đích học tập và so sánh.
 
 Người dùng có thể tự nhập khóa (key) tùy chỉnh cho 2 thuật toán này để hiểu rõ hơn về cơ chế hoạt động.
+
+Yêu cầu khóa có cấu trúc: Đối với các thuật toán phức tạp hơn như Affine và Hill, ứng dụng hướng dẫn người dùng nhập khóa theo đúng định dạng (ví dụ: a,b cho Affine và a,b,c,d cho ma trận Hill 2x2), giúp sinh viên hiểu rõ hơn về cấu trúc khóa của từng loại mã hóa.
 
 Ứng dụng luôn hiển thị cảnh báo về độ an toàn thấp của 2 thuật toán này.
 
