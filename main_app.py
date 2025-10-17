@@ -10,6 +10,24 @@ from ttkbootstrap.constants import *
 import random
 import string
 import base64
+import sys
+
+# Khai báo các ID thuật toán để ánh xạ giữa Tên hiển thị và Key trong crypto_utils
+ALGORITHMS_MAP = {
+    # ID: (Tên hiển thị, Tên trong crypto_utils)
+    1: ("AES (Hiện đại 1/10)", "AES"), 
+    6: ("DES (Hiện đại 6/10)", "DES"), 
+    8: ("RSA (Hiện đại 8/10)", "RSA"),
+    2: ("Caesar (Cổ điển 2/10)", "CAESAR"),
+    3: ("Hoán vị (Cổ điển 3/10)", "TRANS"),
+    4: ("Affine (Cổ điển 4/10)", "AFFINE"),
+    5: ("Hill (Cổ điển 5/10)", "HILL"),
+    7: ("Vigenère (Cổ điển 7/10)", "VIGENERE"), 
+    9: ("MD5 (HÀM BĂM 9/10)", "MD5"),
+    10: ("SHA-256 (HÀM BĂM 10/10)", "SHA256"),
+}
+# Tạo danh sách tên thuật toán hiển thị trong ComboBox
+ALGO_DISPLAY_NAMES = [name for name, _ in ALGORITHMS_MAP.values()]
 
 class PasswordSafeApp(ttk.Window):
     def __init__(self):
@@ -23,6 +41,14 @@ class PasswordSafeApp(ttk.Window):
         self.usb_drive_path = None
         
         self.create_widgets()
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def on_closing(self):
+        if hasattr(self, 'usb_monitor_running') and self.usb_monitor_running:
+            messagebox.showinfo("Tắt Ứng Dụng", "Đang đóng ứng dụng.")
+            self.quit() 
+        else:
+            self.destroy()
 
     def center_window(self):
         self.update_idletasks()
@@ -36,33 +62,39 @@ class PasswordSafeApp(ttk.Window):
         main_frame = ttk.Frame(self, padding=15)
         main_frame.pack(expand=True, fill=BOTH)
 
+        # --- KHU VỰC ĐIỀU KHIỂN ---
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill=X, pady=(0, 15))
 
-        self.open_button = ttk.Button(control_frame, text=" Mở File .psafe", command=self.open_encrypted_file, bootstyle="secondary", width=15)
-        self.open_button.pack(side=LEFT, padx=(0, 10))
+        self.open_button = ttk.Button(control_frame, text=" Mở File", command=self.open_encrypted_file, bootstyle="secondary", width=15)
+        self.open_button.pack(side=LEFT, padx=(0, 5))
         self.import_txt_button = ttk.Button(control_frame, text=" Nhập từ .txt", command=self.import_from_txt, bootstyle="info", width=15)
-        self.import_txt_button.pack(side=LEFT, padx=(0, 10))
+        self.import_txt_button.pack(side=LEFT, padx=(5, 5))
         self.generate_pass_button = ttk.Button(control_frame, text=" Tạo Mật Khẩu", command=self.open_password_generator, bootstyle="info", width=15)
-        self.generate_pass_button.pack(side=LEFT, padx=(0, 10))
-        self.preview_button = ttk.Button(control_frame, text="Xem Mã Hóa", command=self.preview_encryption, bootstyle="warning", width=15)
-        self.preview_button.pack(side=LEFT, padx=(0, 10))
-        self.save_button = ttk.Button(control_frame, text=" Lưu & Mã Hóa", command=self.save_encrypted_file, bootstyle="primary", width=15)
-        self.save_button.pack(side=LEFT, padx=(0, 10))
-        self.export_usb_button = ttk.Button(control_frame, text=" Xuất Ra USB", command=self.export_to_usb, bootstyle="success", width=15)
-        self.export_usb_button.pack(side=LEFT, padx=(0, 10))
+        self.generate_pass_button.pack(side=LEFT, padx=(5, 10))
         
+        # Nút Mã hóa/Giải mã
+        self.preview_button = ttk.Button(control_frame, text="Xem Mã Hóa", command=self.preview_encryption, bootstyle="warning", width=15)
+        self.preview_button.pack(side=LEFT, padx=(0, 5))
+        self.decrypt_button = ttk.Button(control_frame, text=" Giải Mã", command=self.decrypt_current_content, bootstyle="danger", width=15)
+        self.decrypt_button.pack(side=LEFT, padx=(5, 10)) 
+        
+        self.save_button = ttk.Button(control_frame, text=" Lưu & Mã Hóa", command=self.save_encrypted_file, bootstyle="primary", width=15)
+        self.save_button.pack(side=LEFT, padx=(0, 5))
+        self.export_usb_button = ttk.Button(control_frame, text=" Xuất Ra USB", command=self.export_to_usb, bootstyle="success", width=15)
+        self.export_usb_button.pack(side=LEFT, padx=(5, 0))
+        
+        # --- KHU VỰC THUẬT TOÁN ---
         algo_frame = ttk.Labelframe(main_frame, text=" Thuật Toán Mã Hóa ", padding=15)
         algo_frame.pack(fill=X, pady=(0, 15))
         
-        self.algo_var = tk.StringVar(value="AES")
-        self.algorithms = ["AES", "Caesar", "Transposition", "Affine", "Hill"]
+        self.algo_var = tk.StringVar(value=ALGORITHMS_MAP[1][0]) 
         
-        algo_label = ttk.Label(algo_frame, text="Chọn thuật toán:")
+        algo_label = ttk.Label(algo_frame, text="Chọn thuật toán (10/10):")
         algo_label.pack(side=LEFT, padx=(0, 10))
         
         algo_menu = ttk.Combobox(
-            algo_frame, textvariable=self.algo_var, values=self.algorithms,
+            algo_frame, textvariable=self.algo_var, values=ALGO_DISPLAY_NAMES,
             state="readonly", bootstyle="info"
         )
         algo_menu.pack(side=LEFT, fill=X, expand=True)
@@ -72,8 +104,10 @@ class PasswordSafeApp(ttk.Window):
         self.algo_warning_label.pack(side=LEFT, padx=(10, 0))
         self.on_algo_change()
 
+        # --- KHU VỰC TEXT (Notebook) ---
         notebook = ttk.Notebook(main_frame)
         notebook.pack(expand=True, fill=BOTH)
+        
         tab_plain = ttk.Frame(notebook, padding=0)
         self.text_area = tk.Text(
             tab_plain, wrap="word", bg="#2b3e50", fg="#ffffff",
@@ -82,6 +116,7 @@ class PasswordSafeApp(ttk.Window):
         )
         self.text_area.pack(expand=True, fill=BOTH)
         notebook.add(tab_plain, text="Soạn Thảo (Bản Rõ)")
+        
         tab_encrypted = ttk.Frame(notebook, padding=0)
         self.encrypted_text_area = tk.Text(
             tab_encrypted, wrap="word", bg="#202020", fg="#a0a0a0",
@@ -90,35 +125,56 @@ class PasswordSafeApp(ttk.Window):
         )
         self.encrypted_text_area.pack(expand=True, fill=BOTH)
         notebook.add(tab_encrypted, text="Xem Trước (Bản Mã Hóa)")
+        
         self.notebook = notebook
+        
+        # --- STATUS BAR ---
         self.status_bar = ttk.Label(self, text="Sẵn sàng", padding=5, bootstyle="primary-inverse", anchor=W)
         self.status_bar.pack(side=BOTTOM, fill=X)
+        self.usb_monitor_running = False
+
+    def get_selected_algo_key(self):
+        selected_name = self.algo_var.get()
+        for _, (display_name, key) in ALGORITHMS_MAP.items():
+            if display_name == selected_name:
+                return key
+        return None
 
     def on_algo_change(self, event=None):
-        algo = self.algo_var.get()
-        if algo != "AES":
-            self.algo_warning_label.config(text="⚠️ KHÔNG AN TOÀN")
-        else:
+        algo_display_name = self.algo_var.get()
+        
+        if "AES" in algo_display_name:
             self.algo_warning_label.config(text="")
+        elif "Cổ điển" in algo_display_name:
+            self.algo_warning_label.config(text="⚠️ KHÔNG AN TOÀN (Chỉ dùng cho học tập)")
+        elif "HÀM BĂM" in algo_display_name:
+            self.algo_warning_label.config(text="⚠️ HÀM BĂM (Không thể giải mã)")
+        else: # DES, RSA
+            self.algo_warning_label.config(text="⚠️ CÓ THỂ LỖI (Khóa/Key phức tạp)")
 
     def _perform_encryption_flow(self):
         content = self.text_area.get(1.0, tk.END).strip()
+        selected_algorithm_key = self.get_selected_algo_key()
+
         if not content:
             messagebox.showwarning("Nội dung rỗng", "Không có gì để mã hóa.", parent=self)
             return None, None
 
-        key_or_pass = self.prompt_for_key_or_password()
-        if not key_or_pass:
-            return None, None
+        if selected_algorithm_key in ["MD5", "SHA256"]:
+             key_or_pass = "N/A"
+        else:
+             key_or_pass = self.prompt_for_key_or_password()
+             if not key_or_pass: return None, None
         
-        selected_algorithm = self.algo_var.get().upper()
-        if selected_algorithm != "AES":
-             if not messagebox.askokcancel("Cảnh Báo Bảo Mật", f"Bạn đang sử dụng thuật toán '{selected_algorithm}' KHÔNG AN TOÀN. Chỉ nên dùng cho mục đích thử nghiệm. Bạn có muốn tiếp tục?", parent=self):
-                return None, None
+        
+        if selected_algorithm_key not in ["AES", "MD5", "SHA256"]:
+             if not messagebox.askokcancel("Cảnh Báo Bảo Mật", f"Bạn đang sử dụng thuật toán '{self.algo_var.get()}' KHÔNG AN TOÀN. Chỉ nên dùng cho mục đích thử nghiệm. Bạn có muốn tiếp tục?", parent=self):
+                 return None, None
             
-        encrypted_blob = crypto_utils.encrypt_data(key_or_pass, content, selected_algorithm)
+        encrypted_blob = crypto_utils.encrypt_data(key_or_pass, content, selected_algorithm_key)
+        
         if not encrypted_blob:
-            messagebox.showerror("Lỗi Mã Hóa", "Quá trình mã hóa đã thất bại. Vui lòng kiểm tra lại định dạng khóa.", parent=self)
+            messagebox.showerror("Lỗi Mã Hóa", "Quá trình mã hóa đã thất bại. Vui lòng kiểm tra lại định dạng khóa hoặc nội dung văn bản (chỉ chữ cái cho các thuật toán cổ điển).", parent=self)
             return None, None
         
         return encrypted_blob, key_or_pass
@@ -126,7 +182,12 @@ class PasswordSafeApp(ttk.Window):
     def update_encrypted_view(self, content_bytes):
         self.encrypted_text_area.config(state="normal")
         self.encrypted_text_area.delete(1.0, tk.END)
-        encoded_content = base64.b64encode(content_bytes).decode('utf-8')
+        
+        if len(content_bytes) > 1 and content_bytes[0] in [9, 10]: 
+            encoded_content = content_bytes[1:].decode('utf-8')
+        else:
+            encoded_content = base64.b64encode(content_bytes).decode('utf-8')
+        
         self.encrypted_text_area.insert(tk.END, encoded_content)
         self.encrypted_text_area.config(state="disabled")
 
@@ -137,6 +198,169 @@ class PasswordSafeApp(ttk.Window):
             self.status_bar.config(text=f"Đã xem trước mã hóa với thuật toán {self.algo_var.get()}.")
             self.notebook.select(1)
 
+    def decrypt_current_content(self):
+        """Lấy nội dung mã hóa (Base64) từ tab xem trước, yêu cầu khóa, và giải mã."""
+        
+        encoded_content = self.encrypted_text_area.get(1.0, tk.END).strip()
+        selected_algorithm_key = self.get_selected_algo_key()
+
+        if not encoded_content or selected_algorithm_key in ["MD5", "SHA256"]:
+            messagebox.showwarning("Không thể giải mã", "Không có dữ liệu mã hóa để giải mã, hoặc bạn đã chọn Hàm Băm.", parent=self)
+            return
+
+        key_or_pass = self.prompt_for_key_or_password(is_decrypt=True) 
+        if not key_or_pass: return
+        
+        try:
+            # 1. Decode Base64 về bytes
+            encrypted_blob_raw = base64.b64decode(encoded_content)
+            
+            # 2. Thêm Algorithm ID vào đầu blob 
+            algo_id = next((id for id, (display_name, key) in ALGORITHMS_MAP.items() if key == selected_algorithm_key), 1)
+            encrypted_blob = bytes([algo_id]) + encrypted_blob_raw
+            
+            # 3. Giải mã
+            decrypted_content = crypto_utils.decrypt_data(key_or_pass, encrypted_blob)
+
+            if decrypted_content is not None:
+                # 4. Hiển thị kết quả vào Tab Bản Rõ
+                self.text_area.delete(1.0, tk.END)
+                self.text_area.insert(tk.END, decrypted_content)
+                self.status_bar.config(text=f"Đã giải mã thành công ({self.algo_var.get()}).")
+                self.notebook.select(0) 
+            else:
+                messagebox.showerror("Lỗi Giải Mã", "Mật khẩu/khóa không đúng, định dạng không khớp, hoặc dữ liệu đã bị hỏng.", parent=self)
+
+        except base64.binascii.Error:
+            messagebox.showerror("Lỗi Dữ Liệu", "Dữ liệu mã hóa không phải là Base64 hợp lệ. Hãy đảm bảo bạn đã xem trước mã hóa trước đó.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Lỗi Giải Mã", "Quá trình giải mã thất bại do lỗi định dạng khóa hoặc nội dung.", parent=self)
+
+    def prompt_for_key_or_password(self, is_decrypt=False):
+        algo_key = self.get_selected_algo_key()
+        action = "Giải Mã" if is_decrypt else "Mã Hóa"
+        
+        prompts = {
+            "AES": (f"Nhập Mật Khẩu Chủ ({action})", "Vui lòng nhập mật khẩu chủ của bạn:"),
+            "CAESAR": (f"Nhập Khóa Dịch Chuyển ({action})", "Nhập khóa là một số nguyên (ví dụ: 3).\nChỉ mã hóa chữ cái."),
+            "TRANS": (f"Nhập Khóa Hoán Vị ({action})", "Nhập khóa là một chuỗi chữ cái không lặp lại (ví dụ: 'PYTHON').\nChỉ mã hóa chữ cái."),
+            "AFFINE": (f"Nhập Khóa Affine ({action})", "Nhập khóa dạng a,b (ví dụ: 5,8).\n'a' phải nguyên tố cùng nhau với 26. Chỉ mã hóa chữ cái."),
+            "HILL": (f"Nhập Khóa Hill ({action})", "Nhập 4 số cho ma trận [[a,b],[c,d]] dạng a,b,c,d\n(ví dụ: 9,4,5,7). Chỉ mã hóa chữ cái."),
+            "VIGENERE": (f"Nhập Khóa Vigenère ({action})", "Nhập khóa là một chuỗi chữ cái (ví dụ: 'SECRET').\nChỉ mã hóa chữ cái."),
+            "DES": (f"Nhập Khóa DES/3DES ({action})", "Khóa DES (tối đa 24 ký tự, được băm về 24 byte)."),
+            "RSA": (f"Khóa RSA ({action})", "Khóa RSA được tạo ngẫu nhiên. Bấm OK."),
+        }
+        title, prompt = prompts.get(algo_key, (f"Lỗi ({action})", "Thuật toán không xác định"))
+        show_char = '*' if algo_key in ["AES", "DES"] else ''
+        return simpledialog.askstring(title, prompt, show=show_char, parent=self)
+
+
+    def open_encrypted_file(self):
+        filepath = filedialog.askopenfilename(title="Chọn file để giải mã", filetypes=[("Password Safe Files", "*.psafe"), ("All files", "*.*")])
+        if not filepath: return
+        try:
+            with open(filepath, 'rb') as f: file_content = f.read()
+            if not file_content: messagebox.showerror("Lỗi", "File rỗng.", parent=self); return
+            
+            algo_id = file_content[0]
+            selected_algo_name = next((display_name for id, (display_name, _) in ALGORITHMS_MAP.items() if id == algo_id), ALGORITHMS_MAP[1][0])
+            
+            self.algo_var.set(selected_algo_name)
+            self.on_algo_change()
+        except Exception as e:
+            messagebox.showerror("Lỗi Đọc File", f"Không thể đọc file: {e}", parent=self); return
+
+        key_or_pass = self.prompt_for_key_or_password(is_decrypt=True)
+        if not key_or_pass: return
+        
+        decrypted_content = crypto_utils.decrypt_data(key_or_pass, file_content)
+        if decrypted_content is not None:
+            self.text_area.delete(1.0, tk.END); self.text_area.insert(tk.END, decrypted_content)
+            self.update_encrypted_view(file_content)
+            self.current_file_path = filepath
+            self.notebook.select(0)
+            self.status_bar.config(text=f"Đã mở và giải mã thành công: {os.path.basename(filepath)}")
+        else:
+            messagebox.showerror("Lỗi Giải Mã", "Mật khẩu/khóa không đúng hoặc file đã bị hỏng.", parent=self)
+
+    def save_encrypted_file(self):
+        filepath = filedialog.asksaveasfilename(title="Lưu file mã hóa", defaultextension=".psafe", filetypes=[("Password Safe Files", "*.psafe"), ("All files", "*.*")])
+        if not filepath: return
+        if os.path.exists(filepath):
+            if not messagebox.askyesno("Cảnh Báo", f"File '{os.path.basename(filepath)}' đã tồn tại. Ghi đè?", parent=self): return
+        
+        encrypted_blob, key_or_pass = self._perform_encryption_flow()
+        if encrypted_blob and key_or_pass and self.get_selected_algo_key() not in ["MD5", "SHA256"]:
+            
+            is_new_file = not self.current_file_path or os.path.normpath(self.current_file_path) != os.path.normpath(filepath)
+            if is_new_file and self.get_selected_algo_key() == "AES":
+                 confirm_pass = simpledialog.askstring("Xác Nhận Mật Khẩu", "Nhập lại mật khẩu để xác nhận:", show='*', parent=self)
+                 if key_or_pass != confirm_pass:
+                     messagebox.showerror("Lỗi", "Mật khẩu xác nhận không khớp.", parent=self); return
+
+            try:
+                 with open(filepath, 'wb') as f: f.write(encrypted_blob)
+                 self.current_file_path = filepath
+                 self.update_encrypted_view(encrypted_blob)
+                 self.status_bar.config(text=f"Đã mã hóa ({self.algo_var.get()}) và lưu thành công: {os.path.basename(filepath)}")
+                 messagebox.showinfo("Thành Công", "Dữ liệu đã được mã hóa và lưu an toàn!", parent=self)
+            except Exception as e:
+                 messagebox.showerror("Lỗi", f"Không thể ghi file: {e}", parent=self)
+    
+    def find_usb_drives(self):
+        if sys.platform.startswith('win'):
+            return [p.device for p in psutil.disk_partitions() if 'removable' in p.opts or 'cdrom' not in p.opts]
+        else: 
+             return [p.mountpoint for p in psutil.disk_partitions() if 'removable' in p.opts]
+
+    def export_to_usb(self):
+        usb_drives, usb_path = self.find_usb_drives(), None
+        if not usb_drives:
+            messagebox.showerror("Không Tìm Thấy USB", "Vui lòng cắm USB và thử lại.", parent=self); return
+        
+        if len(usb_drives) > 1:
+             choice_win = ttk.Toplevel(self)
+             choice_win.title("Chọn Ổ Đĩa USB"); choice_win.geometry("300x200"); choice_win.transient(self); choice_win.grab_set()
+             ttk.Label(choice_win, text="Tìm thấy nhiều ổ USB. Vui lòng chọn một:").pack(pady=10)
+             usb_var = tk.StringVar()
+             for drive in usb_drives: ttk.Radiobutton(choice_win, text=drive, variable=usb_var, value=drive).pack(anchor=W, padx=20)
+             def on_select(): nonlocal usb_path; usb_path = usb_var.get(); choice_win.destroy()
+             ttk.Button(choice_win, text="Xác nhận", command=on_select, bootstyle="success").pack(pady=10)
+             self.wait_window(choice_win)
+        else: usb_path = usb_drives[0]
+        if not usb_path: return
+        
+        final_usb_path = usb_path 
+        
+        encrypted_blob, _ = self._perform_encryption_flow()
+        if encrypted_blob:
+            try:
+                with open(os.path.join(final_usb_path, "passwords.psafe"), 'wb') as f: f.write(encrypted_blob)
+                bat_content = f"@echo off\nrem Dam bao ban da chep cac file main_app.py va crypto_utils.py vao cung thu muc\npython main_app.py\npause\n"
+                with open(os.path.join(final_usb_path, "start_app.bat"), 'w') as f: f.write(bat_content)
+                
+                self.usb_drive_path = final_usb_path
+                messagebox.showinfo("Thành Công!", f"Đã xuất dữ liệu thành công ra USB ({self.usb_drive_path}).\nỨng dụng sẽ tự động đóng khi USB được tháo ra.", parent=self)
+                self.start_usb_monitor()
+            except Exception as e:
+                messagebox.showerror("Lỗi Ghi File", f"Không thể lưu file vào USB: {e}", parent=self)
+            
+    def monitor_usb(self):
+        self.usb_monitor_running = True
+        if not self.usb_drive_path: return
+        
+        current_drives = self.find_usb_drives()
+        
+        while self.usb_drive_path in current_drives:
+            time.sleep(3)
+            current_drives = self.find_usb_drives()
+        
+        self.quit()
+
+    def start_usb_monitor(self):
+        monitor_thread = threading.Thread(target=self.monitor_usb, daemon=True)
+        monitor_thread.start()
+        
     def clear_clipboard_if_unchanged(self, original_password):
         try:
             if self.clipboard_get() == original_password:
@@ -144,6 +368,21 @@ class PasswordSafeApp(ttk.Window):
                 self.status_bar.config(text="Clipboard đã được xóa an toàn.")
         except tk.TclError:
             pass
+            
+    def import_from_txt(self):
+        if self.text_area.get(1.0, tk.END).strip():
+            if not messagebox.askyesno("Cảnh Báo", "Thao tác này sẽ xóa nội dung hiện tại. Bạn có muốn tiếp tục?"):
+                return
+        filepath = filedialog.askopenfilename(title="Chọn file .txt để nhập", filetypes=[("Text Files", "*.txt"), ("All files", "*.*")])
+        if not filepath: return
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f: content = f.read()
+            self.text_area.delete(1.0, tk.END); self.text_area.insert(tk.END, content)
+            self.encrypted_text_area.config(state="normal"); self.encrypted_text_area.delete(1.0, tk.END); self.encrypted_text_area.config(state="disabled")
+            self.current_file_path = None 
+            self.status_bar.config(text=f"Đã nhập nội dung từ: {os.path.basename(filepath)}")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể đọc file .txt: {e}")
 
     def open_password_generator(self):
         gen_window = ttk.Toplevel(self)
@@ -209,121 +448,6 @@ class PasswordSafeApp(ttk.Window):
         insert_button = ttk.Button(action_frame, text="Chèn vào", command=insert_password, bootstyle="success")
         insert_button.pack(side=LEFT, expand=True, fill=X, padx=(5, 0))
         generate_password()
-
-    def import_from_txt(self):
-        if self.text_area.get(1.0, tk.END).strip():
-            if not messagebox.askyesno("Cảnh Báo", "Thao tác này sẽ xóa nội dung hiện tại. Bạn có muốn tiếp tục?"):
-                return
-        filepath = filedialog.askopenfilename(title="Chọn file .txt để nhập", filetypes=[("Text Files", "*.txt"), ("All files", "*.*")])
-        if not filepath: return
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f: content = f.read()
-            self.text_area.delete(1.0, tk.END); self.text_area.insert(tk.END, content)
-            self.encrypted_text_area.config(state="normal"); self.encrypted_text_area.delete(1.0, tk.END); self.encrypted_text_area.config(state="disabled")
-            self.current_file_path = None 
-            self.status_bar.config(text=f"Đã nhập nội dung từ: {os.path.basename(filepath)}")
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể đọc file .txt: {e}")
-
-    def prompt_for_key_or_password(self):
-        algo = self.algo_var.get().upper()
-        prompts = {
-            "AES": ("Nhập Mật Khẩu Chủ", "Vui lòng nhập mật khẩu chủ của bạn:"),
-            "CAESAR": ("Nhập Khóa Dịch Chuyển", "Nhập khóa là một số nguyên (ví dụ: 3):"),
-            "TRANSPOSITION": ("Nhập Khóa Hoán Vị", "Nhập khóa là một chuỗi chữ cái không lặp lại (ví dụ: 'PYTHON'):"),
-            "AFFINE": ("Nhập Khóa Affine", "Nhập khóa dạng a,b (ví dụ: 5,8).\n'a' phải nguyên tố cùng nhau với 26."),
-            "HILL": ("Nhập Khóa Hill (2x2)", "Nhập 4 số cho ma trận [[a,b],[c,d]] dạng a,b,c,d\n(ví dụ: 9,4,5,7).")
-        }
-        title, prompt = prompts.get(algo, ("Lỗi", "Thuật toán không xác định"))
-        show_char = '*' if algo == "AES" else ''
-        return simpledialog.askstring(title, prompt, show=show_char, parent=self)
-
-    def open_encrypted_file(self):
-        filepath = filedialog.askopenfilename(title="Chọn file để giải mã", filetypes=[("Password Safe Files", "*.psafe"), ("All files", "*.*")])
-        if not filepath: return
-        try:
-            with open(filepath, 'rb') as f: file_content = f.read()
-            if not file_content: messagebox.showerror("Lỗi", "File rỗng.", parent=self); return
-            algo_id_map = {1: "AES", 2: "Caesar", 3: "Transposition", 4: "Affine", 5: "Hill"}
-            self.algo_var.set(algo_id_map.get(file_content[0], "AES"))
-            self.on_algo_change()
-        except Exception as e:
-            messagebox.showerror("Lỗi Đọc File", f"Không thể đọc file: {e}", parent=self); return
-
-        key_or_pass = self.prompt_for_key_or_password()
-        if not key_or_pass: return
-        
-        decrypted_content = crypto_utils.decrypt_data(key_or_pass, file_content)
-        if decrypted_content is not None:
-            self.text_area.delete(1.0, tk.END); self.text_area.insert(tk.END, decrypted_content)
-            self.update_encrypted_view(file_content)
-            self.current_file_path, self.notebook.select(0)
-            self.status_bar.config(text=f"Đã mở và giải mã thành công: {os.path.basename(filepath)}")
-        else:
-            messagebox.showerror("Lỗi Giải Mã", "Mật khẩu/khóa không đúng hoặc file đã bị hỏng.", parent=self)
-
-    def save_encrypted_file(self):
-        filepath = filedialog.asksaveasfilename(title="Lưu file mã hóa", defaultextension=".psafe", filetypes=[("Password Safe Files", "*.psafe"), ("All files", "*.*")])
-        if not filepath: return
-        if os.path.exists(filepath):
-            if not messagebox.askyesno("Cảnh Báo", f"File '{os.path.basename(filepath)}' đã tồn tại. Ghi đè?", parent=self): return
-        
-        encrypted_blob, key_or_pass = self._perform_encryption_flow()
-        if encrypted_blob and key_or_pass:
-            is_new_file = not self.current_file_path or os.path.normpath(self.current_file_path) != os.path.normpath(filepath)
-            if is_new_file and self.algo_var.get() == "AES":
-                confirm_pass = simpledialog.askstring("Xác Nhận Mật Khẩu", "Nhập lại mật khẩu để xác nhận:", show='*', parent=self)
-                if key_or_pass != confirm_pass:
-                    messagebox.showerror("Lỗi", "Mật khẩu xác nhận không khớp.", parent=self); return
-
-            try:
-                with open(filepath, 'wb') as f: f.write(encrypted_blob)
-                self.current_file_path = filepath
-                self.update_encrypted_view(encrypted_blob)
-                self.status_bar.config(text=f"Đã mã hóa ({self.algo_var.get()}) và lưu thành công: {os.path.basename(filepath)}")
-                messagebox.showinfo("Thành Công", "Dữ liệu đã được mã hóa và lưu an toàn!", parent=self)
-            except Exception as e:
-                messagebox.showerror("Lỗi", f"Không thể ghi file: {e}", parent=self)
-    
-    def find_usb_drives(self):
-        return [p.mountpoint for p in psutil.disk_partitions() if 'removable' in p.opts and 'disk' in p.fstype]
-
-    def export_to_usb(self):
-        usb_drives, usb_path = self.find_usb_drives(), None
-        if not usb_drives:
-            messagebox.showerror("Không Tìm Thấy USB", "Vui lòng cắm USB và thử lại.", parent=self); return
-        elif len(usb_drives) > 1:
-            choice_win = ttk.Toplevel(self)
-            choice_win.title("Chọn Ổ Đĩa USB"); choice_win.geometry("300x200"); choice_win.transient(self); choice_win.grab_set()
-            ttk.Label(choice_win, text="Tìm thấy nhiều ổ USB. Vui lòng chọn một:").pack(pady=10)
-            usb_var = tk.StringVar()
-            for drive in usb_drives: ttk.Radiobutton(choice_win, text=drive, variable=usb_var, value=drive).pack(anchor=W, padx=20)
-            def on_select(): nonlocal usb_path; usb_path = usb_var.get(); choice_win.destroy()
-            ttk.Button(choice_win, text="Xác nhận", command=on_select, bootstyle="success").pack(pady=10)
-            self.wait_window(choice_win)
-        else: usb_path = usb_drives[0]
-        if not usb_path: return
-        
-        encrypted_blob, _ = self._perform_encryption_flow()
-        if encrypted_blob:
-            try:
-                with open(os.path.join(usb_path, "passwords.psafe"), 'wb') as f: f.write(encrypted_blob)
-                bat_content = f"@echo off\nrem Dam bao ban da chep cac file main_app.py va crypto_utils.py vao cung thu muc\npython main_app.py\npause\n"
-                with open(os.path.join(usb_path, "start_app.bat"), 'w') as f: f.write(bat_content)
-                self.usb_drive_path = usb_path
-                messagebox.showinfo("Thành Công!", f"Đã xuất dữ liệu thành công ra USB ({usb_path}).", parent=self)
-                self.start_usb_monitor()
-            except Exception as e:
-                messagebox.showerror("Lỗi Ghi File", f"Không thể lưu file vào USB: {e}", parent=self)
-            
-    def monitor_usb(self):
-        if not self.usb_drive_path: return
-        while True:
-            time.sleep(3)
-            if self.usb_drive_path not in self.find_usb_drives(): self.destroy(); break
-
-    def start_usb_monitor(self):
-        monitor_thread = threading.Thread(target=self.monitor_usb, daemon=True); monitor_thread.start()
 
 if __name__ == "__main__":
     try:

@@ -1,11 +1,16 @@
 import os
+import math
+import hashlib
+import base64
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
-import math
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.ciphers import Cipher as DesCipher, algorithms as DesAlgorithms, modes as DesModes
 
-# --- CÁC HÀM HỖ TRỢ ---
+# --- CÁC HÀM HỖ TRỢ TOÁN HỌC ---
 def gcd(a, b):
     while b: a, b = b, a % b
     return a
@@ -17,10 +22,8 @@ def mod_inverse(a, m):
             return x
     return None
 
-# --- CÁC THUẬT TOÁN MÃ HÓA CỔ ĐIỂN ---
-
+# --- 1. MÃ HÓA DỊCH VÒNG (CAESAR CIPHER) - ID 2 ---
 def caesar_cipher(text, shift, encrypt=True):
-    # ... (Giữ nguyên)
     result = ""
     shift_amount = shift if encrypt else -shift
     for char in text:
@@ -32,31 +35,39 @@ def caesar_cipher(text, shift, encrypt=True):
             result += char
     return result
 
+# --- 3. MÃ HÓA HOÁN VỊ (TRANSPOSITION CIPHER) - ID 3 ---
 def transposition_cipher(text, key, encrypt=True):
-    # ... (Giữ nguyên)
     if encrypt:
         num_cols = len(key)
         num_rows = math.ceil(len(text) / num_cols)
-        padded_text = text.ljust(num_rows * num_cols, '_')
+        # Sử dụng ký tự padding khác, ví dụ '\x00' (null byte), để tránh lỗi khi giải mã
+        padded_text = text.ljust(num_rows * num_cols, '_') 
         grid = [padded_text[i:i+num_cols] for i in range(0, len(padded_text), num_cols)]
         key_order = sorted(range(len(key)), key=lambda k: key[k])
         ciphertext = "".join(grid[row_idx][col_idx] for col_idx in key_order for row_idx in range(num_rows))
         return ciphertext
     else:
-        num_cols, num_rows = len(key), math.ceil(len(text) / num_cols)
+        num_cols = len(key)
+        num_rows = math.ceil(len(text) / num_cols)
         key_order = sorted(range(len(key)), key=lambda k: key[k])
         num_shaded_boxes = (num_cols * num_rows) - len(text)
         grid = [['' for _ in range(num_cols)] for _ in range(num_rows)]
         text_idx = 0
-        for col_idx in key_order:
-            for row_idx in range(num_rows):
-                if not (row_idx == num_rows - 1 and key_order.index(col_idx) >= num_cols - num_shaded_boxes):
-                    if text_idx < len(text):
-                        grid[row_idx][col_idx] = text[text_idx]; text_idx += 1
+        for col_idx_sorted_order in range(num_cols):
+            original_col_idx = key_order[col_idx_sorted_order]
+            col_len = num_rows
+            if original_col_idx >= num_cols - num_shaded_boxes and num_shaded_boxes > 0:
+                col_len = num_rows - 1
+
+            for row_idx in range(col_len):
+                if text_idx < len(text):
+                    grid[row_idx][original_col_idx] = text[text_idx]
+                    text_idx += 1
+        # Fix: đảm bảo loại bỏ ký tự padding '_'
         return "".join("".join(row) for row in grid).rstrip('_')
 
+# --- 5. MÃ HÓA THAY THẾ AFFINE (AFFINE CIPHER) - ID 4 ---
 def affine_cipher(text, key_a, key_b, encrypt=True):
-    # ... (Giữ nguyên)
     result = ""
     mod_inv_a = mod_inverse(key_a, 26)
     if mod_inv_a is None and not encrypt: raise ValueError(f"Hệ số a={key_a} không hợp lệ.")
@@ -72,19 +83,17 @@ def affine_cipher(text, key_a, key_b, encrypt=True):
         else: result += char
     return result
 
-# CẢI TIẾN: Sửa lỗi logic và cải thiện thông báo lỗi cho Hill
+# --- 5. MÃ HÓA THAY THẾ HILL (HILL CIPHER 2x2) - ID 5 ---
 def hill_cipher(text, key_matrix, encrypt=True):
-    # Kiểm tra tính khả nghịch của ma trận NGAY TỪ ĐẦU
     det = (key_matrix[0][0] * key_matrix[1][1] - key_matrix[0][1] * key_matrix[1][0]) % 26
     if gcd(det, 26) != 1:
-        # Đây là thông báo lỗi mới, cụ thể hơn
-        raise ValueError("Khóa không hợp lệ (định thức của ma trận là số chẵn hoặc 13).")
+        raise ValueError("Khóa không hợp lệ (định thức không khả nghịch mod 26).")
 
     processed_text = ''.join(filter(str.isalpha, text.lower()))
-    if len(processed_text) % 2 != 0: processed_text += 'x'
+    is_padded = len(processed_text) % 2 != 0 # Cờ kiểm tra padding
+    if is_padded: processed_text += 'x'
 
     result = ""
-    
     if encrypt:
         matrix = key_matrix
     else: # Decrypt
@@ -96,81 +105,243 @@ def hill_cipher(text, key_matrix, encrypt=True):
         
     for i in range(0, len(processed_text), 2):
         p1, p2 = ord(processed_text[i]) - ord('a'), ord(processed_text[i+1]) - ord('a')
-        
-        # Sửa lại công thức nhân ma trận theo chuẩn K * P (Matrix x Vector)
         c1 = (matrix[0][0] * p1 + matrix[0][1] * p2) % 26
         c2 = (matrix[1][0] * p1 + matrix[1][1] * p2) % 26
-        
         result += chr(c1 + ord('a')) + chr(c2 + ord('a'))
+    
+    # Fix: Loại bỏ ký tự padding 'x' khi giải mã
+    if not encrypt and is_padded and result.endswith('x'):
+        return result[:-1]
+
     return result
 
-# --- HÀM TIỆN ÍCH CHUNG ---
+# --- 4. MÃ HÓA VIGENÈRE (VIGENÈRE CIPHER) - ID 7 ---
+def vigenere_cipher(text, key, encrypt=True):
+    result = ""
+    key = ''.join(filter(str.isalpha, key)).upper()
+    key_len = len(key)
+    if key_len == 0:
+        return text
 
+    key_as_shifts = [ord(k) - ord('A') for k in key]
+    key_idx = 0
+
+    for char in text:
+        if 'a' <= char <= 'z':
+            start = ord('a')
+            key_shift = key_as_shifts[key_idx % key_len]
+            if not encrypt: key_shift = -key_shift 
+            
+            new_ord = (ord(char) - start + key_shift) % 26 + start
+            result += chr(new_ord)
+            
+            key_idx += 1
+        elif 'A' <= char <= 'Z':
+            start = ord('A')
+            key_shift = key_as_shifts[key_idx % key_len]
+            if not encrypt: key_shift = -key_shift 
+            
+            new_ord = (ord(char) - start + key_shift) % 26 + start
+            result += chr(new_ord)
+            
+            key_idx += 1
+        else:
+            result += char
+    return result
+
+# --- 6. MÃ HÓA DES (DATA ENCRYPTION STANDARD) - ID 6 ---
+def des_cipher(key_bytes, data_bytes, encrypt=True):
+    # Khóa phải là 24 bytes cho 3DES 3-Key
+    if len(key_bytes) != 24:
+        # Nếu key ngắn hơn 24 byte, dùng SHA256 để rút gọn và lặp lại
+        hashed_key = hashlib.sha256(key_bytes).digest()
+        key_24_bytes = (hashed_key * 3)[:24] # Lặp lại 3 lần và cắt thành 24 byte
+        key_bytes = key_24_bytes
+        
+    if len(key_bytes) != 24:
+        # Lỗi xảy ra khi băm vẫn không đủ (rất hiếm nếu key_bytes đủ lớn)
+        raise ValueError("DES/3DES key must be exactly 24 bytes after derivation.")
+    
+    iv = os.urandom(8) # IV 8 bytes cho DES/3DES
+    cipher = DesCipher(DesAlgorithms.TripleDES(key_bytes), DesModes.CBC(iv), backend=default_backend()) 
+    
+    if encrypt:
+        encryptor = cipher.encryptor()
+        pad_len = 8 - (len(data_bytes) % 8)
+        padded_data = data_bytes + bytes([pad_len] * pad_len)
+        ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+        return iv + ciphertext
+    else:
+        iv_received = data_bytes[:8]
+        ciphertext = data_bytes[8:]
+        
+        cipher_decrypt = DesCipher(DesAlgorithms.TripleDES(key_bytes), DesModes.CBC(iv_received), backend=default_backend())
+        decryptor = cipher_decrypt.decryptor()
+        padded_data = decryptor.update(ciphertext) + decryptor.finalize()
+        
+        pad_len = padded_data[-1]
+        if pad_len > 8: return None
+        return padded_data[:-pad_len]
+
+# --- HÀM HỖ TRỢ KEY DERIVATION ---
 def kdf(password_bytes):
-    #... (Giữ nguyên)
     salt = b'fixed_salt_for_demo_dont_use_in_prod'
     kdf_func = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
     return kdf_func.derive(password_bytes)
 
-def encrypt_data(key_or_password, data, algorithm="AES"):
-    # ... (Phần logic AES, Caesar, Trans, Affine giữ nguyên)
-    # Cập nhật lại logic gọi Hill
-    if algorithm == "AES":
-        salt = os.urandom(16); iv = os.urandom(16); key = kdf(key_or_password.encode())
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend()); encryptor = cipher.encryptor()
-        pad_len = 16 - (len(data.encode()) % 16); padded_data = data.encode() + bytes([pad_len] * pad_len)
-        encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
-        return b'\x01' + salt + iv + encrypted_data
-    elif algorithm == "CAESAR":
-        try: return b'\x02' + caesar_cipher(data, int(key_or_password), encrypt=True).encode('utf-8')
-        except: return None
-    elif algorithm == "TRANS":
-        if not (len(set(key_or_password)) == len(key_or_password) and key_or_password.isalpha()): return None
-        return b'\x03' + transposition_cipher(data, key_or_password, encrypt=True).encode('utf-8')
-    elif algorithm == "AFFINE":
-        try:
-            parts = key_or_password.split(','); a, b = int(parts[0]), int(parts[1])
-            if len(parts) != 2 or gcd(a, 26) != 1: return None
-            return b'\x04' + affine_cipher(data, a, b, encrypt=True).encode('utf-8')
-        except: return None
-    elif algorithm == "HILL":
-        try:
-            parts = key_or_password.split(',')
-            if len(parts) != 4: return None
-            k = [int(p) for p in parts]
-            key_matrix = [[k[0], k[1]], [k[2], k[3]]]
-            # Bây giờ hill_cipher sẽ tự kiểm tra và báo lỗi nếu cần
-            return b'\x05' + hill_cipher(data, key_matrix, encrypt=True).encode('utf-8')
-        except: return None
-    return None
+# --- 7. MÃ HÓA AES (ADVANCED ENCRYPTION STANDARD) - ID 1 ---
+# Logic tích hợp trong encrypt/decrypt_data
 
+# --- 8. MÃ HÓA RSA (RIVEST-SHAMIR-ADLEMAN) - ID 8 ---
+def rsa_encrypt_decrypt(data, encrypt=True):
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
+    public_key = private_key.public_key()
+    data_bytes = data.encode('utf-8')
+
+    if encrypt:
+        ciphertext = public_key.encrypt(
+            data_bytes,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        private_key_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        return private_key_pem + b'::SPLIT::' + ciphertext
+    else:
+        pass
+
+# --- 9. HÀM BĂM MD5 128 (MESSAGE-DIGEST ALGORITHM 5) - ID 9 ---
+def hash_md5(data):
+    return hashlib.md5(data.encode('utf-8')).hexdigest()
+
+# --- 10. HÀM BĂM SHA 256 (SECURE HASHING ALGORITHM 256) - ID 10 ---
+def hash_sha256(data):
+    return hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+# --- HÀM TIỆN ÍCH CHUNG (ENCRYPT) ---
+
+def encrypt_data(key_or_password, data, algorithm="AES"):
+    try:
+        if algorithm == "AES": # ID 1
+            salt = os.urandom(16); iv = os.urandom(16); key = kdf(key_or_password.encode())
+            cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend()); encryptor = cipher.encryptor()
+            pad_len = 16 - (len(data.encode()) % 16); padded_data = data.encode() + bytes([pad_len] * pad_len)
+            encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
+            return b'\x01' + salt + iv + encrypted_data
+        
+        elif algorithm == "CAESAR": # ID 2
+             return b'\x02' + caesar_cipher(data, int(key_or_password), encrypt=True).encode('utf-8')
+             
+        elif algorithm == "TRANS": # ID 3
+             if not (len(set(key_or_password)) == len(key_or_password) and key_or_password.isalpha()): return None
+             return b'\x03' + transposition_cipher(data, key_or_password.upper(), encrypt=True).encode('utf-8')
+             
+        elif algorithm == "AFFINE": # ID 4
+             parts = key_or_password.split(','); a, b = int(parts[0]), int(parts[1])
+             if len(parts) != 2 or gcd(a, 26) != 1: return None
+             return b'\x04' + affine_cipher(data, a, b, encrypt=True).encode('utf-8')
+             
+        elif algorithm == "HILL": # ID 5
+             parts = key_or_password.split(',')
+             if len(parts) != 4: return None
+             k = [int(p) for p in parts]
+             key_matrix = [[k[0], k[1]], [k[2], k[3]]]
+             return b'\x05' + hill_cipher(data, key_matrix, encrypt=True).encode('utf-8')
+             
+        elif algorithm == "DES": # ID 6
+             key_bytes = key_or_password.encode('utf-8')
+             encrypted_data_raw = des_cipher(key_bytes, data.encode('utf-8'), encrypt=True)
+             return b'\x06' + encrypted_data_raw
+             
+        elif algorithm == "VIGENERE": # ID 7
+             cleaned_key = ''.join(filter(str.isalpha, key_or_password))
+             if not cleaned_key: return None
+             return b'\x07' + vigenere_cipher(data, cleaned_key, encrypt=True).encode('utf-8')
+             
+        elif algorithm == "RSA": # ID 8
+            rsa_blob = rsa_encrypt_decrypt(data, encrypt=True)
+            return b'\x08' + rsa_blob
+            
+        elif algorithm == "MD5": # ID 9
+             return b'\x09' + hash_md5(data).encode('utf-8')
+             
+        elif algorithm == "SHA256": # ID 10
+             return b'\x0a' + hash_sha256(data).encode('utf-8')
+             
+        return None
+    except Exception as e:
+        return None
+
+# --- HÀM TIỆN ÍCH CHUNG (DECRYPT) ---
 def decrypt_data(key_or_password, encrypted_blob):
     try:
         algo_id, encrypted_data_raw = encrypted_blob[0], encrypted_blob[1:]
-        if algo_id == 1:
+        
+        if algo_id == 1: # AES
             salt, iv, encrypted_data = encrypted_blob[1:17], encrypted_blob[17:33], encrypted_blob[33:]
             key = kdf(key_or_password.encode())
             cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend()); decryptor = cipher.decryptor()
             padded_data = decryptor.update(encrypted_data) + decryptor.finalize()
             pad_len = padded_data[-1]
             return padded_data[:-pad_len].decode('utf-8') if pad_len <= 16 else None
-        elif algo_id == 2:
-            return caesar_cipher(encrypted_data_raw.decode('utf-8'), int(key_or_password), encrypt=False)
-        elif algo_id == 3:
-            if not (len(set(key_or_password)) == len(key_or_password) and key_or_password.isalpha()): return None
-            return transposition_cipher(encrypted_data_raw.decode('utf-8'), key_or_password, encrypt=False)
-        elif algo_id == 4:
-            parts = key_or_password.split(','); a, b = int(parts[0]), int(parts[1])
-            if len(parts) != 2 or gcd(a, 26) != 1: return None
-            return affine_cipher(encrypted_data_raw.decode('utf-8'), a, b, encrypt=False)
-        elif algo_id == 5:
-            parts = key_or_password.split(',')
-            if len(parts) != 4: return None
-            k = [int(p) for p in parts]
-            key_matrix = [[k[0], k[1]], [k[2], k[3]]]
-            # Bây giờ hill_cipher sẽ tự kiểm tra và báo lỗi nếu cần
-            return hill_cipher(encrypted_data_raw.decode('utf-8'), key_matrix, encrypt=False)
+            
+        elif algo_id == 2: # CAESAR
+             return caesar_cipher(encrypted_data_raw.decode('utf-8'), int(key_or_password), encrypt=False)
+             
+        elif algo_id == 3: # TRANS
+             if not (len(set(key_or_password)) == len(key_or_password) and key_or_password.isalpha()): return None
+             # Fix: loại bỏ padding '_'
+             return transposition_cipher(encrypted_data_raw.decode('utf-8'), key_or_password.upper(), encrypt=False).rstrip('_') 
+             
+        elif algo_id == 4: # AFFINE
+             parts = key_or_password.split(','); a, b = int(parts[0]), int(parts[1])
+             if len(parts) != 2 or gcd(a, 26) != 1: return None
+             return affine_cipher(encrypted_data_raw.decode('utf-8'), a, b, encrypt=False)
+             
+        elif algo_id == 5: # HILL
+             parts = key_or_password.split(',')
+             if len(parts) != 4: return None
+             k = [int(p) for p in parts]
+             key_matrix = [[k[0], k[1]], [k[2], k[3]]]
+             # Fix: hill_cipher tự loại bỏ padding 'x'
+             return hill_cipher(encrypted_data_raw.decode('utf-8'), key_matrix, encrypt=False)
+             
+        elif algo_id == 6: # DES
+             key_bytes = key_or_password.encode('utf-8')
+             return des_cipher(key_bytes, encrypted_data_raw, encrypt=False).decode('utf-8')
+             
+        elif algo_id == 7: # VIGENERE
+             cleaned_key = ''.join(filter(str.isalpha, key_or_password))
+             if not cleaned_key: return None
+             return vigenere_cipher(encrypted_data_raw.decode('utf-8'), cleaned_key, encrypt=False)
+             
+        elif algo_id == 8: # RSA
+            if b'::SPLIT::' not in encrypted_data_raw: return None
+            private_key_pem, ciphertext = encrypted_data_raw.split(b'::SPLIT::', 1)
+            
+            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+            
+            decrypted_data = private_key.decrypt(
+                ciphertext,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+            return decrypted_data.decode('utf-8')
+            
+        elif algo_id == 9: # MD5 (Không giải mã)
+            return f"Không thể giải mã MD5. Giá trị băm: {encrypted_data_raw.decode('utf-8')}"
+        elif algo_id == 10: # SHA256 (Không giải mã)
+            return f"Không thể giải mã SHA-256. Giá trị băm: {encrypted_data_raw.decode('utf-8')}"
+             
         return None
     except Exception as e:
-        print(f"Error during decryption: {e}") # In lỗi ra console để debug
         return None
