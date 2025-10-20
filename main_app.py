@@ -303,20 +303,37 @@ class PasswordSafeApp(ttk.Window):
         if os.path.exists(filepath):
             if not messagebox.askyesno("Cảnh Báo", f"File '{os.path.basename(filepath)}' đã tồn tại. Ghi đè?", parent=self): return
         
+        # Bước 1: Thực hiện luồng mã hóa
         encrypted_blob, key_or_pass = self._perform_encryption_flow()
+        
+        # Chỉ tiếp tục nếu mã hóa thành công và không phải là Hàm Băm
         if encrypted_blob and key_or_pass and self.get_selected_algo_key() not in ["MD5", "SHA256"]:
             
-            # Yêu cầu xác nhận mật khẩu cho AES/RSA (Mật khẩu được dùng để bảo vệ file/key)
+            # Bước 2: Yêu cầu xác nhận mật khẩu (cho AES/RSA)
             if self.get_selected_algo_key() in ["AES", "RSA"]:
                  confirm_pass = simpledialog.askstring("Xác Nhận Mật Khẩu", "Nhập lại mật khẩu để xác nhận:", show='*', parent=self)
                  if key_or_pass != confirm_pass:
                      messagebox.showerror("Lỗi", "Mật khẩu xác nhận không khớp.", parent=self); return
 
             try:
+                 # Bước 3: Ghi file mã hóa vào ổ đĩa
                  with open(filepath, 'wb') as f: f.write(encrypted_blob)
                  self.current_file_path = filepath
-                 self.update_encrypted_view(encrypted_blob)
-                 self.status_bar.config(text=f"Đã mã hóa ({self.algo_var.get()}) và lưu thành công: {os.path.basename(filepath)}")
+                 
+                 # --- BỔ SUNG BẢO MẬT: XÓA DỮ LIỆU RÕ VÀ BẢN MÃ HÓA KHỎI GIAO DIỆN (Memory Sanitization) ---
+                 
+                 # 3a. Xóa nội dung Bản Rõ (Soạn Thảo)
+                 self.text_area.delete(1.0, tk.END) 
+                 
+                 # 3b. Xóa nội dung Bản Mã Hóa (Xem Trước) và đảm bảo nó bị vô hiệu hóa
+                 self.encrypted_text_area.config(state="normal")
+                 self.encrypted_text_area.delete(1.0, tk.END)
+                 self.encrypted_text_area.config(state="disabled")
+                 
+                 # --- KẾT THÚC BỔ SUNG ---
+                 
+                 # Bước 4: Thông báo thành công
+                 self.status_bar.config(text=f"Đã mã hóa ({self.algo_var.get()}) và lưu thành công: {os.path.basename(filepath)}. Dữ liệu nhạy cảm đã được xóa khỏi giao diện.")
                  messagebox.showinfo("Thành Công", "Dữ liệu đã được mã hóa và lưu an toàn!", parent=self)
             except Exception as e:
                  messagebox.showerror("Lỗi", f"Không thể ghi file: {e}", parent=self)
