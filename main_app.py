@@ -144,13 +144,15 @@ class PasswordSafeApp(ttk.Window):
         algo_display_name = self.algo_var.get()
         
         if "AES" in algo_display_name:
-            self.algo_warning_label.config(text="")
+            self.algo_warning_label.config(text="✅ GCM Mode: An toàn & Kiểm tra tính toàn vẹn")
         elif "Cổ điển" in algo_display_name:
             self.algo_warning_label.config(text="⚠️ KHÔNG AN TOÀN (Chỉ dùng cho học tập)")
         elif "HÀM BĂM" in algo_display_name:
             self.algo_warning_label.config(text="⚠️ HÀM BĂM (Không thể giải mã)")
-        else: # DES, RSA
-            self.algo_warning_label.config(text="⚠️ CÓ THỂ LỖI (Khóa/Key phức tạp)")
+        elif "DES" in algo_display_name:
+            self.algo_warning_label.config(text="⚠️ CÓ THỂ LỖI (Khóa/Key phức tạp, đã lỗi thời)")
+        else: # RSA
+            self.algo_warning_label.config(text="⚠️ RSA: Khóa riêng được bảo vệ bằng mật khẩu")
 
     def _perform_encryption_flow(self):
         content = self.text_area.get(1.0, tk.END).strip()
@@ -183,11 +185,12 @@ class PasswordSafeApp(ttk.Window):
         self.encrypted_text_area.config(state="normal")
         self.encrypted_text_area.delete(1.0, tk.END)
         
-        if len(content_bytes) > 1 and content_bytes[0] in [9, 10]: 
-            encoded_content = content_bytes[1:].decode('utf-8')
+        # Chỉ Base64 encode phần nội dung mã hóa thô (loại bỏ Algorithm ID)
+        if len(content_bytes) > 0:
+            encoded_content = base64.b64encode(content_bytes[1:]).decode('utf-8')
         else:
-            encoded_content = base64.b64encode(content_bytes).decode('utf-8')
-        
+            encoded_content = ""
+            
         self.encrypted_text_area.insert(tk.END, encoded_content)
         self.encrypted_text_area.config(state="disabled")
 
@@ -219,8 +222,14 @@ class PasswordSafeApp(ttk.Window):
             algo_id = next((id for id, (display_name, key) in ALGORITHMS_MAP.items() if key == selected_algorithm_key), 1)
             encrypted_blob = bytes([algo_id]) + encrypted_blob_raw
             
-            # 3. Giải mã
-            decrypted_content = crypto_utils.decrypt_data(key_or_pass, encrypted_blob)
+            # 3. Giải mã (Cập nhật để hỗ trợ RSA)
+            rsa_key_pass = key_or_pass if selected_algorithm_key == "RSA" else None
+        
+            decrypted_content = crypto_utils.decrypt_data(
+                key_or_pass, 
+                encrypted_blob, 
+                rsa_key_password=rsa_key_pass
+            )
 
             if decrypted_content is not None:
                 # 4. Hiển thị kết quả vào Tab Bản Rõ
@@ -229,10 +238,10 @@ class PasswordSafeApp(ttk.Window):
                 self.status_bar.config(text=f"Đã giải mã thành công ({self.algo_var.get()}).")
                 self.notebook.select(0) 
             else:
-                messagebox.showerror("Lỗi Giải Mã", "Mật khẩu/khóa không đúng, định dạng không khớp, hoặc dữ liệu đã bị hỏng.", parent=self)
+                messagebox.showerror("Lỗi Giải Mã", "Mật khẩu/khóa không đúng, dữ liệu bị giả mạo (AES-GCM), hoặc dữ liệu đã bị hỏng.", parent=self)
 
         except base64.binascii.Error:
-            messagebox.showerror("Lỗi Dữ Liệu", "Dữ liệu mã hóa không phải là Base64 hợp lệ. Hãy đảm bảo bạn đã xem trước mã hóa trước đó.", parent=self)
+            messagebox.showerror("Lỗi Dữ Liệu", "Dữ liệu mã hóa không phải là Base64 hợp lệ.", parent=self)
         except Exception as e:
             messagebox.showerror("Lỗi Giải Mã", "Quá trình giải mã thất bại do lỗi định dạng khóa hoặc nội dung.", parent=self)
 
@@ -248,10 +257,10 @@ class PasswordSafeApp(ttk.Window):
             "HILL": (f"Nhập Khóa Hill ({action})", "Nhập 4 số cho ma trận [[a,b],[c,d]] dạng a,b,c,d\n(ví dụ: 9,4,5,7). Chỉ mã hóa chữ cái."),
             "VIGENERE": (f"Nhập Khóa Vigenère ({action})", "Nhập khóa là một chuỗi chữ cái (ví dụ: 'SECRET').\nChỉ mã hóa chữ cái."),
             "DES": (f"Nhập Khóa DES/3DES ({action})", "Khóa DES (tối đa 24 ký tự, được băm về 24 byte)."),
-            "RSA": (f"Khóa RSA ({action})", "Khóa RSA được tạo ngẫu nhiên. Bấm OK."),
+            "RSA": (f"Khóa RSA ({action})", "Nhập mật khẩu để bảo vệ Khóa Riêng (Private Key) RSA:"),
         }
         title, prompt = prompts.get(algo_key, (f"Lỗi ({action})", "Thuật toán không xác định"))
-        show_char = '*' if algo_key in ["AES", "DES"] else ''
+        show_char = '*' if algo_key in ["AES", "DES", "RSA"] else ''
         return simpledialog.askstring(title, prompt, show=show_char, parent=self)
 
 
@@ -273,7 +282,12 @@ class PasswordSafeApp(ttk.Window):
         key_or_pass = self.prompt_for_key_or_password(is_decrypt=True)
         if not key_or_pass: return
         
-        decrypted_content = crypto_utils.decrypt_data(key_or_pass, file_content)
+        # Cập nhật Logic Giải mã (Hỗ trợ RSA)
+        selected_algorithm_key = self.get_selected_algo_key()
+        rsa_key_pass = key_or_pass if selected_algorithm_key == "RSA" else None
+        
+        decrypted_content = crypto_utils.decrypt_data(key_or_pass, file_content, rsa_key_password=rsa_key_pass)
+        
         if decrypted_content is not None:
             self.text_area.delete(1.0, tk.END); self.text_area.insert(tk.END, decrypted_content)
             self.update_encrypted_view(file_content)
@@ -281,7 +295,7 @@ class PasswordSafeApp(ttk.Window):
             self.notebook.select(0)
             self.status_bar.config(text=f"Đã mở và giải mã thành công: {os.path.basename(filepath)}")
         else:
-            messagebox.showerror("Lỗi Giải Mã", "Mật khẩu/khóa không đúng hoặc file đã bị hỏng.", parent=self)
+            messagebox.showerror("Lỗi Giải Mã", "Mật khẩu/khóa không đúng, dữ liệu bị giả mạo (AES-GCM), hoặc file đã bị hỏng.", parent=self)
 
     def save_encrypted_file(self):
         filepath = filedialog.asksaveasfilename(title="Lưu file mã hóa", defaultextension=".psafe", filetypes=[("Password Safe Files", "*.psafe"), ("All files", "*.*")])
@@ -292,8 +306,8 @@ class PasswordSafeApp(ttk.Window):
         encrypted_blob, key_or_pass = self._perform_encryption_flow()
         if encrypted_blob and key_or_pass and self.get_selected_algo_key() not in ["MD5", "SHA256"]:
             
-            is_new_file = not self.current_file_path or os.path.normpath(self.current_file_path) != os.path.normpath(filepath)
-            if is_new_file and self.get_selected_algo_key() == "AES":
+            # Yêu cầu xác nhận mật khẩu cho AES/RSA (Mật khẩu được dùng để bảo vệ file/key)
+            if self.get_selected_algo_key() in ["AES", "RSA"]:
                  confirm_pass = simpledialog.askstring("Xác Nhận Mật Khẩu", "Nhập lại mật khẩu để xác nhận:", show='*', parent=self)
                  if key_or_pass != confirm_pass:
                      messagebox.showerror("Lỗi", "Mật khẩu xác nhận không khớp.", parent=self); return
@@ -335,9 +349,16 @@ class PasswordSafeApp(ttk.Window):
         encrypted_blob, _ = self._perform_encryption_flow()
         if encrypted_blob:
             try:
-                with open(os.path.join(final_usb_path, "passwords.psafe"), 'wb') as f: f.write(encrypted_blob)
+                # Kiểm tra và tạo thư mục nếu cần (đảm bảo quyền ghi)
+                usb_target_dir = os.path.join(final_usb_path, "PasswordSafe")
+                os.makedirs(usb_target_dir, exist_ok=True)
+                
+                # Lưu file mã hóa
+                with open(os.path.join(usb_target_dir, "passwords.psafe"), 'wb') as f: f.write(encrypted_blob)
+                
+                # Tạo script chạy
                 bat_content = f"@echo off\nrem Dam bao ban da chep cac file main_app.py va crypto_utils.py vao cung thu muc\npython main_app.py\npause\n"
-                with open(os.path.join(final_usb_path, "start_app.bat"), 'w') as f: f.write(bat_content)
+                with open(os.path.join(usb_target_dir, "start_app.bat"), 'w') as f: f.write(bat_content)
                 
                 self.usb_drive_path = final_usb_path
                 messagebox.showinfo("Thành Công!", f"Đã xuất dữ liệu thành công ra USB ({self.usb_drive_path}).\nỨng dụng sẽ tự động đóng khi USB được tháo ra.", parent=self)
@@ -355,7 +376,8 @@ class PasswordSafeApp(ttk.Window):
             time.sleep(3)
             current_drives = self.find_usb_drives()
         
-        self.quit()
+        # Sử dụng after để quit trong luồng chính
+        self.after(0, self.quit)
 
     def start_usb_monitor(self):
         monitor_thread = threading.Thread(target=self.monitor_usb, daemon=True)

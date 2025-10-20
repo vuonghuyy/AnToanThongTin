@@ -9,6 +9,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher as DesCipher, algorithms as DesAlgorithms, modes as DesModes
+from cryptography.exceptions import InvalidTag
 
 # --- CÁC HÀM HỖ TRỢ TOÁN HỌC ---
 def gcd(a, b):
@@ -186,14 +187,15 @@ def des_cipher(key_bytes, data_bytes, encrypt=True):
 # --- HÀM HỖ TRỢ KEY DERIVATION ---
 def kdf(password_bytes):
     salt = b'fixed_salt_for_demo_dont_use_in_prod'
-    kdf_func = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
+    # Tăng iterations lên 600,000 để tăng bảo mật chống bruteforce
+    kdf_func = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=600000, backend=default_backend())
     return kdf_func.derive(password_bytes)
 
 # --- 7. MÃ HÓA AES (ADVANCED ENCRYPTION STANDARD) - ID 1 ---
 # Logic tích hợp trong encrypt/decrypt_data
 
 # --- 8. MÃ HÓA RSA (RIVEST-SHAMIR-ADLEMAN) - ID 8 ---
-def rsa_encrypt_decrypt(data, encrypt=True):
+def rsa_encrypt_decrypt(data, private_key_password=None, encrypt=True):
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
     public_key = private_key.public_key()
     data_bytes = data.encode('utf-8')
@@ -207,10 +209,15 @@ def rsa_encrypt_decrypt(data, encrypt=True):
                 label=None
             )
         )
+        
+        if private_key_password is None:
+             raise ValueError("Phải cung cấp mật khẩu để bảo vệ Private Key của RSA.")
+             
+        # SỬ DỤNG BestAvailableEncryption để mã hóa Private Key bằng mật khẩu
         private_key_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption_algorithm=serialization.BestAvailableEncryption(private_key_password.encode('utf-8'))
         )
         return private_key_pem + b'::SPLIT::' + ciphertext
     else:
@@ -228,12 +235,20 @@ def hash_sha256(data):
 
 def encrypt_data(key_or_password, data, algorithm="AES"):
     try:
-        if algorithm == "AES": # ID 1
-            salt = os.urandom(16); iv = os.urandom(16); key = kdf(key_or_password.encode())
-            cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend()); encryptor = cipher.encryptor()
-            pad_len = 16 - (len(data.encode()) % 16); padded_data = data.encode() + bytes([pad_len] * pad_len)
-            encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
-            return b'\x01' + salt + iv + encrypted_data
+        if algorithm == "AES": # ID 1 (Đã nâng cấp lên AES-GCM)
+            salt = os.urandom(16)
+            key = kdf(key_or_password.encode()) # Khóa 32 byte
+            nonce = os.urandom(12) # Nonce 12 byte cho GCM
+            
+            # Sử dụng GCM (Authenticated Encryption)
+            cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend()) 
+            encryptor = cipher.encryptor()
+            
+            encrypted_data = encryptor.update(data.encode()) + encryptor.finalize()
+            tag = encryptor.tag # Lấy Authentication Tag (16 bytes)
+            
+            # Format mới: ID + Salt + Nonce + Tag + Ciphertext
+            return b'\x01' + salt + nonce + tag + encrypted_data
         
         elif algorithm == "CAESAR": # ID 2
              return b'\x02' + caesar_cipher(data, int(key_or_password), encrypt=True).encode('utf-8')
@@ -264,8 +279,8 @@ def encrypt_data(key_or_password, data, algorithm="AES"):
              if not cleaned_key: return None
              return b'\x07' + vigenere_cipher(data, cleaned_key, encrypt=True).encode('utf-8')
              
-        elif algorithm == "RSA": # ID 8
-            rsa_blob = rsa_encrypt_decrypt(data, encrypt=True)
+        elif algorithm == "RSA": # ID 8 (Pass mật khẩu để bảo vệ Private Key)
+            rsa_blob = rsa_encrypt_decrypt(data, private_key_password=key_or_password, encrypt=True)
             return b'\x08' + rsa_blob
             
         elif algorithm == "MD5": # ID 9
@@ -279,17 +294,22 @@ def encrypt_data(key_or_password, data, algorithm="AES"):
         return None
 
 # --- HÀM TIỆN ÍCH CHUNG (DECRYPT) ---
-def decrypt_data(key_or_password, encrypted_blob):
+def decrypt_data(key_or_password, encrypted_blob, rsa_key_password=None):
     try:
         algo_id, encrypted_data_raw = encrypted_blob[0], encrypted_blob[1:]
         
-        if algo_id == 1: # AES
-            salt, iv, encrypted_data = encrypted_blob[1:17], encrypted_blob[17:33], encrypted_blob[33:]
+        if algo_id == 1: # AES (GCM Decrypt)
+            # Lấy Salt (16), Nonce (12), Tag (16), và Ciphertext
+            salt, nonce, tag, encrypted_data = encrypted_blob[1:17], encrypted_blob[17:29], encrypted_blob[29:45], encrypted_blob[45:]
             key = kdf(key_or_password.encode())
-            cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend()); decryptor = cipher.decryptor()
-            padded_data = decryptor.update(encrypted_data) + decryptor.finalize()
-            pad_len = padded_data[-1]
-            return padded_data[:-pad_len].decode('utf-8') if pad_len <= 16 else None
+            
+            # Sử dụng GCM, bao gồm Tag để xác thực
+            cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())
+            decryptor = cipher.decryptor()
+            
+            # Giải mã và xác thực. Nếu tag không khớp, .finalize() sẽ raise InvalidTag
+            decrypted_data = decryptor.update(encrypted_data) + decryptor.finalize()
+            return decrypted_data.decode('utf-8')
             
         elif algo_id == 2: # CAESAR
              return caesar_cipher(encrypted_data_raw.decode('utf-8'), int(key_or_password), encrypt=False)
@@ -314,7 +334,8 @@ def decrypt_data(key_or_password, encrypted_blob):
              
         elif algo_id == 6: # DES
              key_bytes = key_or_password.encode('utf-8')
-             return des_cipher(key_bytes, encrypted_data_raw, encrypt=False).decode('utf-8')
+             decrypted_bytes = des_cipher(key_bytes, encrypted_data_raw, encrypt=False)
+             return decrypted_bytes.decode('utf-8') if decrypted_bytes is not None else None
              
         elif algo_id == 7: # VIGENERE
              cleaned_key = ''.join(filter(str.isalpha, key_or_password))
@@ -325,7 +346,14 @@ def decrypt_data(key_or_password, encrypted_blob):
             if b'::SPLIT::' not in encrypted_data_raw: return None
             private_key_pem, ciphertext = encrypted_data_raw.split(b'::SPLIT::', 1)
             
-            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+            # RSA Khóa riêng đã được mã hóa, cần mật khẩu (rsa_key_password) để tải
+            if rsa_key_password is None: return None 
+            
+            private_key = serialization.load_pem_private_key(
+                private_key_pem, 
+                password=rsa_key_password.encode('utf-8'), # <<< Truyền mật khẩu bảo vệ khóa
+                backend=default_backend()
+            )
             
             decrypted_data = private_key.decrypt(
                 ciphertext,
@@ -343,5 +371,9 @@ def decrypt_data(key_or_password, encrypted_blob):
             return f"Không thể giải mã SHA-256. Giá trị băm: {encrypted_data_raw.decode('utf-8')}"
              
         return None
+    except InvalidTag:
+        # Lỗi InvalidTag từ AES-GCM khi dữ liệu bị giả mạo hoặc mật khẩu sai
+        return None
     except Exception as e:
+        # Bắt các lỗi khác (lỗi định dạng khóa, lỗi RSA, v.v.)
         return None
